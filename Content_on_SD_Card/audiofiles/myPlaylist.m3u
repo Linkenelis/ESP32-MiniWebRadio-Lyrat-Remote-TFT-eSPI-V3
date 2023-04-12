@@ -1,0 +1,9 @@
+#EXTM3U
+#EXTINF:8,logo-1.mp3
+myPlaylist/logo-1.mp3
+#EXTINF:3,τόνος ανακοίνωσης - ανακοίνωση-3.mp3
+myPlaylist/%CE%B1%CE%BD%CE%B1%CE%BA%CE%BF%CE%AF%CE%BD%CF%89%CF%83%CE%B7-3.mp3
+#EXTINF:4,фирменный или товарный знак - Лого-2.mp3
+myPlaylist/%D0%9B%D0%BE%D0%B3%D0%BE-2.mp3
+#EXTINF:8,audio_b88f2350c2.mp3
+https://cdn.pixabay.com/audio/2022/01/11/audio_b88f2350c2.mp3

@@ -386,7 +386,7 @@ const char index_html[] PROGMEM = R"=====(
     <img src="SD/png/ListYellow.png"                width="1" height="1" loading="eager" alt="Image 40" />
     <img src="SD/png/ShuffleGreen.png"              width="1" height="1" loading="eager" alt="Image 41" />
     <img src="SD/png/ShuffleYellow.png"             width="1" height="1" loading="eager" alt="Image 42" />
-    <img src="SD/png/DLNA_logo_Yellow.png"          width="1" height="1" loading="eager" alt="Image 43" />
+    <img src="SD/png/Button_DLNA_Yellow.png"        width="1" height="1" loading="eager" alt="Image 43" />
     <img src="SD/png/SD_logo_Yellow.png"            width="1" height="1" loading="eager" alt="Image 44" />
 
   </div>
@@ -951,9 +951,9 @@ function connect() {
                               if(val == '0\n') document.getElementById('shuffle_play').src = 'SD/png/ShuffleGreen.png'
                               break
       case "getplays":        if(val == '0') document.getElementById('plays').src = 'SD/png/SD_logo_Yellow.png'
-                              if(val == '1') document.getElementById('plays').src = 'SD/png/DLNA_logo_Yellow.png'
+                              if(val == '1') document.getElementById('plays').src = 'SD/png/Button_DLNA_Yellow.png'
                               if(val == '2') document.getElementById('plays').src = 'SD/png/RadioYellow.png'
-                              if(val == '3') document.getElementById('plays').src = 'SD/png/BTinYellow.png'
+                              if(val == '3') document.getElementById('plays').src = 'SD/png/Button_Aux_Yellow.png'
                               break
       case "stationNr":       document.getElementById('preset').selectedIndex = Number(val)
                               break

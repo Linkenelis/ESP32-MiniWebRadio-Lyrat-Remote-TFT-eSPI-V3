@@ -1,0 +1,9 @@
+#EXTM3U
+
+sample.mp3
+sample.flac
+
+#EXTINF:-1, Neues vom Känguruh - Die Prophezeiungen
+https://rbbmediapmdp-a.akamaihd.net/content/eb/87/eb8712d5-cfd6-4b7b-b2cf-a7d841c2b6ff/eebc3f50-4907-4a20-96f2-19af7e48829b_01c1d841-9448-4323-8c1c-5dc754de98a3.mp3
+
+sample.wav
