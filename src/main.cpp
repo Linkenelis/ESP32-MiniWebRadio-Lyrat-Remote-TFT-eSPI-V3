@@ -19,7 +19,7 @@
 // FOR PERSONAL USE IT IS SUPPLIED WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE
 // WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHOR
 // OR COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
-// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE 
+// OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE
 
 #include "common.h"
 #include "pins.h"
@@ -85,7 +85,6 @@ boolean        _f_playlistEnabled = false;
 boolean        _f_loop=true;
 boolean        _BT_In=false;
 boolean         audioTask_runs=false;
-boolean         BTTask_runs=   false;
 
 String         _station = "";
 String         _stationName_nvs = "";
@@ -101,12 +100,13 @@ uint8_t        _level = 0;
 int            _currentServer = -1;
 uint32_t       _media_downloadPort = 0;
 String         _media_downloadIP = "";
-vector<String> _names{};
+
 
 char timc[20]; //for digital time
 int clocktype=2;
 int previous_sec=100;
 int previous_day=100;
+int previous_InBuffer=0;
 bool but_done=true;
 bool volbut_done=true;
 bool ButPlay=false;
@@ -115,8 +115,9 @@ bool ButVolMin=false;
 bool ButVolPlus=false;
 bool showTime=true;
 
-enum players{SDcard=0, DLNA=1, Radio=2, BTin=3};
+enum players{SDcard=0, DLNA=1, Radio=2, AUX=3};
 uint8_t plays=Radio;    //starts with radio
+uint8_t dacin=IN1;
 
 uint8_t nbroftracks=0;
 int previousMillis=0;
@@ -125,6 +126,7 @@ bool shuffle_play=false;
 bool switchingDLNAsong=true;
 String _audiotrack="";             //track from SD/mp3files/
 String artsong="";
+String Artist="";
 String connectto="";
 String Title="";
 char packet[255]; //for incoming packet UDP
@@ -151,6 +153,7 @@ enum status{RADIO = 0, RADIOico = 1, RADIOmenue = 2,
             PLAYER= 6, PLAYERico= 7,
             ALARM = 8, SLEEP    = 9, SETTINGS = 10};
 
+
 /** variables for time, set in platformio.ini*/
 char NTP_pool_name[] = NTP_pool;
 const char* ntpServer = NTP_pool_name;
@@ -175,16 +178,11 @@ WiFiClient client;
 WiFiUDP    udp;
 SoapESP32  soap(&client, &udp);
 ES8388 dac(I2C_DATA, I2C_CLK, 400000);
-//BluetoothA2DPSink a2dp_sink;
+
 /** Task handle of the taskhandler */
 TaskHandle_t audioTaskHandler;
-TaskHandle_t BTTaskHandler;
-//TaskHandle_t TimedNext;
-
 
 SemaphoreHandle_t  mutex_rtc;
-//SemaphoreHandle_t  mutex_display;
-
 
 portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 //volatile bool screen_touched = false;
@@ -298,7 +296,7 @@ void IRAM_ATTR onTimer() {
     struct w_n {uint16_t x = 135; uint16_t y = 30;  uint16_t w = 345; uint16_t h = 130;} const _winName;
     struct w_e {uint16_t x = 0;   uint16_t y = 30;  uint16_t w = 480; uint16_t h = 130;} const _winFName;
     struct w_b {uint16_t x = 0;   uint16_t y = 160; uint16_t w = 480; uint16_t h = 5;} const _winVolBar;
-    struct w_t {uint16_t x = 0;   uint16_t y = 165; uint16_t w = 480; uint16_t h = 125;} const _winTitle;
+    struct w_t {uint16_t x = 0;   uint16_t y = 166; uint16_t w = 480; uint16_t h = 124;} const _winTitle;
     struct w_f {uint16_t x = 0;   uint16_t y = 290; uint16_t w = 480; uint16_t h = 30; } const _winFooter;
     struct w_m {uint16_t x = 390; uint16_t y = 0;   uint16_t w =  90; uint16_t h = 30; } const _winTime;
     struct w_i {uint16_t x = 0;   uint16_t y = 0;   uint16_t w = 280; uint16_t h = 30; } const _winItem;
@@ -404,23 +402,6 @@ void UDP_Check(void)
         UDP.endPacket();
     }
   }
-}
-
-
-void BTInit() {
-    xTaskCreatePinnedToCore(
-        BTTask,              // Function to implement the task 
-        "BT-In",            // Name of the task 
-        5000,                   // Stack size in words or bytes?
-        NULL,                   // Task input parameter 
-        2 | portPRIVILEGE_BIT,  // Priority of the task 
-        &BTTaskHandler,                   // Task handle. 
-        0                       // Core where the task should run 
-    );
-}
-//BT-In
-void avrc_metadata_callback(uint8_t id, const uint8_t *text) {
-  Serial.printf("==> AVRC metadata rsp: attribute id 0x%x, %s\n", id, text);
 }
 
 void wifi_conn(void)  // Connect the WiFi
@@ -762,7 +743,7 @@ void showStreamTitle(){
     } else{
         UDP.printf("tft.drawString(%s,%d,%d)\n", ST.c_str(), 0, _winTitle.y + 20 + fontLoaded);
         UDP.printf("tft.setTextColor(%d,%d)\n",TFT_CYAN, TFT_BLACK);
-        UDP.printf("tft.drawString(%s,%d,%d)\n", ST2.c_str(), 0, _winTitle.y + 20 + fontLoaded + fontLoaded);
+        UDP.printf("tft.drawString(%s,%d,%d)\n", ST2.c_str(), 0, _winTitle.y + 20 + fontLoaded + 10 + fontLoaded);
     }
     UDP.endPacket();    //close
     vTaskDelay(50);
@@ -812,8 +793,8 @@ void showLogoAndStationName()
     }
     clearFName();       //clear logo and station Name
     UDP.printf("tft.setTextColor(%d,%d)\n",TFT_WHITE, TFT_BLACK);
-    UDP.printf("tft.drawString(%s,%d,%d)\n", SN.c_str(), _winName.x, _winName.y + font + 10);
-    UDP.printf("tft.drawString(%s,%d,%d)\n", SN2.c_str(), _winName.x, _winName.y + font + font + 10);
+    UDP.printf("tft.drawString(%s,%d,%d)\n", SN.c_str(), _winName.x, _winName.y + fontLoaded + 15);
+    UDP.printf("tft.drawString(%s,%d,%d)\n", SN2.c_str(), _winName.x, _winName.y + fontLoaded + 20 + fontLoaded + 15);
     String logo = "/logo/m/" + String(UTF8toASCII(SN_ascii.c_str())) +".jpg";
     Serial.print("logo="); Serial.println(logo);
     UDP.printf("TJpgDec.drawSdJpg(%d,%d,%s)\n",  0, _winName.y, logo.c_str());
@@ -841,14 +822,14 @@ void showArtistSongAudioFile(){
         UDP.endPacket();
         vTaskDelay(20);
         UDP.beginPacket(Display, UDP_port); //open
-        if (Title.length() <= 15 && artsong.length() <= 15) 
+        if (Title.length() <= 15 && Artist.length() <= 15) 
         {
             if(fontLoaded!=AA_FONT_LARGE)
             {   
                 UDP.printf("tft.loadFont(%d)\n",AA_FONT_LARGE);
                 fontLoaded=AA_FONT_LARGE;
             }
-        } else if (Title.length() <= 25 && artsong.length() <= 25) {
+        } else if (Title.length() <= 25 && Artist.length() <= 25) {
             if(fontLoaded!=AA_FONT_NORMAL)
             {   
                 UDP.printf("tft.loadFont(%d)\n",AA_FONT_NORMAL);
@@ -860,10 +841,9 @@ void showArtistSongAudioFile(){
         }
         clearFName();
         UDP.printf("tft.setTextColor(%d,%d)\n",TFT_HOTPINK, TFT_BLACK);
-        UDP.printf("tft.drawString(%s,%d,%d)\n", artsong.c_str(), 0, _winName.y + fontLoaded);
+        UDP.printf("tft.drawString(%s,%d,%d)\n", Artist.c_str(), 0, _winName.y + fontLoaded+15);
         UDP.printf("tft.setTextColor(%d,%d)\n",TFT_CYAN, TFT_BLACK);
-        UDP.printf("tft.drawString(%s,%d,%d)\n", Title.c_str(), 0, _winName.y + fontLoaded + fontLoaded);
-        artsong="";
+        UDP.printf("tft.drawString(%s,%d,%d)\n", Title.c_str(), 0, _winName.y + fontLoaded + fontLoaded+15);
         UDP.endPacket();
         vTaskDelay(20);
         UDP.beginPacket(Display, UDP_port); //open
@@ -1247,10 +1227,10 @@ void setup(){
         pinMode(AMP_ENABLED, OUTPUT);
         digitalWrite(AMP_ENABLED, HIGH);
     }
-    dac.outputSelect(OUTALL);
-    dac.setOutputVolume(33); //max = 33
+    dac.outputSelect(OUTALL);   //select both and have HP input work it out
+    dac.setOutputVolume(33);    //max = 33 = 100%
     dac.mixerSourceSelect(MIXIN1, MIXIN1);
-    dac.mixerSourceControl(MIXALL);
+    dac.mixerSourceControl(DACOUT);
     dac.DACmute(false);
 
 
@@ -1458,7 +1438,7 @@ inline void mute(){
 void setStation(uint16_t sta){
     //log_i("sta %d, _cur_station %d", sta, _cur_station );
     int vol=_cur_volume;
-    setVolume(0);
+    if(plays!=Radio){setVolume(0);}
     if(sta > _sum_stations) sta = _cur_station;
     sprintf (_chbuf, "station_%03d", sta);
     String content = stations.getString(_chbuf);
@@ -1470,7 +1450,7 @@ void setStation(uint16_t sta){
     _stationURL = strdup(content.c_str());
     _homepage = "";
     _icydescription = "";
-    if(_state != RADIOico) clearTitle();
+    if(_state == RADIO) clearTitle();   //not in Player
     _cur_station = sta;
     if(!_f_isWebConnected) _streamTitle = "";
     showFooterStaNr();
@@ -1488,12 +1468,12 @@ void setStation(uint16_t sta){
     setVolume(vol);
 }
 void nextStation(){
-    if(_cur_station >= _sum_stations) return;
+    if(_cur_station >= _sum_stations) {_cur_station=0;}     //make these go to first, if over
     _cur_station++;
     setStation(_cur_station);
 }
 void prevStation(){
-    if(_cur_station <= 1) return;
+    if(_cur_station <= 1) {_cur_station=_sum_stations+1;}   //make these go to last, if below
     _cur_station--;
     setStation(_cur_station);
 }
@@ -1629,10 +1609,11 @@ void next_track(int tracknbr)
           //Serial.print("This is the track ");Serial.println(sstr+_audiotrack); //do what is usefull here we have tracknbr and name
           found = false;    
           if (plays==DLNA){ //we need to go to \n
+            Title=_audiotrack;    //we do have a title = name from DLNA
             _audiotrack = "";
             while(ch != '\n'){
                 ch = trcklst.read();
-                if(ch!='\n'){_audiotrack += ch;}
+                if(ch!='\n'){_audiotrack += ch;}    //this will be the uri
             }
             trcklst.close();
             //Serial.print("_audiotrack=");Serial.println(_audiotrack);
@@ -1655,7 +1636,7 @@ void next_track(int tracknbr)
 } 
 void next_audio_tracknbr(bool prevnext)  //1=next; 0=prev
   {
-    if(plays==BTin){return;}
+    if(plays==AUX){return;}
     if(plays==Radio) {if(prevnext==0){prevStation();} else {nextStation();}}
     char ch;
     char name_end;
@@ -1713,19 +1694,22 @@ void next_audio_tracknbr(bool prevnext)  //1=next; 0=prev
     }
     Serial.println("Not Found!");
 }
-
 void next_track_needed(bool prevnext){  //1=next; 0=prev
     if (mp3playall)
     {
         if (millis() - previousMillis >= 1000)
         {
-            String str = "";
-            Serial.println("mp3 ended...");
+            switch (plays)
+            {
+            case Radio: {if(prevnext) {nextStation();} else {prevStation();} previousMillis = millis();}
+                return;
+            case SDcard ... DLNA: {
             if (shuffle_play){
                 next_track(1000000);    //not a likely nbr
             } else {
                 next_audio_tracknbr(prevnext);
             }
+            String str = "";
             Serial.print("_audiotrack in next_track_needed= ");
             Serial.println(_audiotrack);
             if(plays==SDcard){connectto = _audiotrack.substring(12);} // remove "/audiofiles/" from _audiotrack (it is added in function audiotrack)
@@ -1742,6 +1726,13 @@ void next_track_needed(bool prevnext){  //1=next; 0=prev
             str = _audiotrack.substring(12);
             showFileName(str.c_str());
             previousMillis = millis();
+            }     //just break 
+                break;
+            case AUX:   {previousMillis = millis();}     //what?
+                return;
+            default:     {previousMillis = millis();}
+                break;
+            }
         }
     }
 }
@@ -1807,21 +1798,12 @@ bool send_tracks_to_web(void){  //read tracklist and send is to the webpage
     webSrv.send(msg);
     return true;
 }
-int DLNA_setCurrentServer(String serverName){
-    int serverNum = -1;
-    for(int i = 0; i < _names.size(); i++){
-        if(_names[i] == serverName) serverNum = i;
-    }
-    _currentServer = serverNum;
-    return serverNum;
-}
 
 void DLNA_showServer(){ // Show connection details of all discovered, usable media servers
     webSrv.send("clearDLNA"); // delete server list
     soap.listServer();
     Serial.println(soap.listServer());
 }
-
 void DLNA_browseServer(String objectId, uint8_t level){
     // Here the user selects the DLNA server whose content he wants to see, level 0 is root
     if(level == 0){
@@ -1829,7 +1811,6 @@ void DLNA_browseServer(String objectId, uint8_t level){
     }
     soap.browseServer(_currentServer, objectId.c_str());
 }
-
 void DLNA_getFileItems(String uri){
     String   _media_downloadIP   = soap.getMediaDownloadIP();
     uint16_t _media_downloadPort = soap.getMediaDownloadPort();
@@ -1840,6 +1821,7 @@ void DLNA_getFileItems(String uri){
     String URL = "http://" + _media_downloadIP + ":" + _media_downloadPort + "/" + uri;
     log_i("URL=%s", URL.c_str());
     audioStopSong();
+    switchingDLNAsong=true;
     audioConnecttohost(URL.c_str());
 }
 void DLNA_showContent(String objectId, uint8_t level){
@@ -2235,16 +2217,16 @@ void DigiClock() //date and time, ip and strength
   
 }
 
-
 void TimedNext(void * parameter)    //delayed nexttrack for DLNA
 {
-    delay(800); 
-    next_track_needed(true);
-    delay(5000);
-    switchingDLNAsong=false;
-    vTaskDelete(NULL);
+    delay(800);                 //wait for music to fade
+    next_track_needed(true);    //start next track
+    delay(5000);                //wait for buffer to fill
+    switchingDLNAsong=false;    //ready for next low buffer
+    vTaskDelete(NULL);          //delete this task
 
 }
+
 void timer_stuff(void)
 {
     if (interruptCounter > 0) //run every 0.1sec
@@ -2256,40 +2238,37 @@ void timer_stuff(void)
         mediumcounter++;
         shortcounter++;     
     }
-    /*if(!but_done){  //500msec for a button OK?
-        switch (shortcounter){
-            case 1: {if(digitalRead(REC)==LOW){REC_but(); but_done=true;} if(digitalRead(MODE)==LOW){MODE_but(); but_done=true;}} 
-            case 2: {if(touchRead(PLAY)<20){PLAY_but(); but_done=true;} if(touchRead(SET)<20){SET_but(); but_done=true;}volbut_done=false;}
-            case 3: {if(touchRead(VOLUP)<20){VOLUP_but(); but_done=true;} if(touchRead(VOLDWN)<20){VOLDWN_but(); but_done=true;}} 
-            case 5: {but_done=false;}
-            case 6: {if(digitalRead(REC)==LOW){REC_but(); but_done=true;} if(digitalRead(MODE)==LOW){MODE_but(); but_done=true;}} 
-            case 7: {if(touchRead(PLAY)<20){PLAY_but(); but_done=true;} if(touchRead(SET)<20){SET_but(); but_done=true;}volbut_done=false;}
-            case 8: {if(touchRead(VOLUP)<20){VOLUP_but(); but_done=true;} if(touchRead(VOLDWN)<20){VOLDWN_but(); but_done=true;}} 
-
-            default: {break;}
-        }
-    }*/
-
-
-
     if (shortcounter >=10) {    //1 sec
         shortcounter=0;
         but_done=false;
         time(&now);
 	    localtime_r(&now, &timeinfo);
-        if(plays==DLNA) {
-            if(audioInbuffFilled() < 10000){
-                if(switchingDLNAsong==false){switchingDLNAsong=true; xTaskCreate(TimedNext, "timedNext", 4000, NULL, 2, NULL);}
+        switch (plays)
+        {
+        case Radio:   {if (dacin!=IN1){dac.inputSelect(IN1); dac.mixerSourceSelect(MIXIN1, MIXIN1); dac.mixerSourceControl(DACOUT); dacin=IN1;} break;}
+        case SDcard:  {if (dacin!=IN1){dac.inputSelect(IN1); dac.mixerSourceSelect(MIXIN1, MIXIN1); dac.mixerSourceControl(DACOUT); dacin=IN1;} break;}
+        case DLNA:    {     //if buffer is low and stable; song has ended, start next song.
+            previous_InBuffer=audioInbuffFilled();
+            if(dacin!=IN1){dac.inputSelect(IN1); dac.mixerSourceSelect(MIXIN1, MIXIN1); dac.mixerSourceControl(DACOUT); dacin=IN1;}
+            if(audioInbuffFilled() < 20000){
+                if(previous_InBuffer==audioInbuffFilled()){
+                    if(switchingDLNAsong==false){switchingDLNAsong=true; xTaskCreate(TimedNext, "timedNext", 4000, NULL, 2, NULL);
+                    }
                 }
-            } else if (audioInbuffFilled()>15000) {switchingDLNAsong==false;}
+            } else if(audioInbuffFilled()>30000) {switchingDLNAsong=false;} //ready for next or after 5 secs delay in TimedNext
+            previous_InBuffer=audioInbuffFilled();Serial.println(previous_InBuffer);
+            break;
+        }
+        case AUX:   {if (dacin!=IN2){Serial.println("IN2");dac.inputSelect(IN2); dac.mixerSourceSelect(MIXIN2, MIXIN2); dac.mixerSourceControl(SRCSELOUT);dacin=IN2;} break;}
+        default:
+            break;
+        }
         if(_f_rtc==true){ // true -> rtc has the current time
             int8_t h=0;
             String time_s;
             xSemaphoreTake(mutex_rtc, portMAX_DELAY);
             time_s = gettime_s();
             xSemaphoreGive(mutex_rtc);
-            //if(!BTTask_runs && !audioTask_runs){audioInit();}
-            //if(_state != ALARM && !_f_sleeping) UDP.printf("tft.showTime(1)\n")
             if(_state == CLOCK || _state == CLOCKico) display_time();
             if(_f_eof && (_state == RADIO || _f_eof_alarm)){
                 _f_eof = false;
@@ -2422,14 +2401,14 @@ void audio_showstreamtitle(const char *info){
 void vs1053_commercial(const char *info){
     _commercial_dur = atoi(info) / 1000;                // info is the duration of advertising in ms
     _streamTitle = "Advertising: " + (String) _commercial_dur + "s";
-    showStreamTitle();
+    if(_state==RADIO){showStreamTitle();}
     SerialPrintfln("StreamTitle: %s", info);
     webSrv.send("streamtitle="+_streamTitle);
 }
 void audio_commercial(const char *info){
     _commercial_dur = atoi(info) / 1000;                // info is the duration of advertising in ms
     _streamTitle = "Advertising: " + (String) _commercial_dur + "s";
-    showStreamTitle();
+    if(_state==RADIO){showStreamTitle();}
     SerialPrintfln("StreamTitle: %s", info);
     webSrv.send("streamtitle="+_streamTitle);
 }
@@ -2474,10 +2453,11 @@ void audio_icyurl(const char *info){                   // if the Radio has a hom
 void vs1053_id3data(const char *info){
     SerialPrintfln("id3data: %s", info);
     String i3d=info;
-    if (i3d.startsWith("Artist: ")) artsong=(i3d.substring(8).c_str());
+    if (i3d.startsWith("Artist: ")) Artist=(i3d.substring(8).c_str());
     else if (i3d.startsWith("Title: ")) Title=(i3d.substring(7).c_str());
     else return;
-    if (!artsong.isEmpty() && !Title.isEmpty()) {
+    if (!Artist.isEmpty() && !Title.isEmpty()) {
+        artsong=Artist;
         artsong.concat(" - "); artsong.concat(Title); 
         showArtistSongAudioFile();
         webSrv.send("audiotrack="+artsong);
@@ -2486,16 +2466,19 @@ void vs1053_id3data(const char *info){
 void audio_id3data(const char *info){
     SerialPrintfln("id3data: %s", info);
     String i3d=info;
-    if (i3d.startsWith("Artist: "))  artsong=(i3d.substring(8).c_str());
-    else if (i3d.startsWith("ARTIST: "))  artsong=(i3d.substring(8).c_str());
+    if (i3d.startsWith("Artist: "))  Artist=(i3d.substring(8).c_str());
+    else if (i3d.startsWith("ARTIST: "))  Artist=(i3d.substring(8).c_str());
     else if (i3d.startsWith("Title: ")) Title=(i3d.substring(7).c_str());
     else if (i3d.startsWith("TITLE: ")) Title=(i3d.substring(7).c_str());
     else return;
+    artsong=Artist;
     String wss=artsong+" - "+ Title;
     webSrv.send("audiotrack="+wss);
-    if (!artsong.isEmpty() && !Title.isEmpty()) {
-        showArtistSongAudioFile();
-    }  
+    if (!Artist.isEmpty() && !Title.isEmpty()) {
+        showArtistSongAudioFile(); return;
+    }
+    //not in the data? lets get it from the txtfile
+
 }
 //----------------------------------------------------------------------------------------
 void vs1053_icydescription(const char *info){
@@ -2655,7 +2638,7 @@ void tp_pressed(uint16_t x, uint16_t y){
                             changeBtn_pressed(btnNr); break;
         case PLAYER_1:      if(btnNr == 0){_releaseNr = 40; mute();} // Mute
                             if(btnNr == 1){_releaseNr = 41;} // RADIO
-                            if(btnNr == 2){_releaseNr = 42;} // BTIn
+                            if(btnNr == 2){_releaseNr = 42;} // AUX
                             if(btnNr == 3){_releaseNr = 43;} // Previous
                             if(btnNr == 4){_releaseNr = 44;} // Next
                             if(btnNr == 5){_releaseNr = 45;} // Shuffle
@@ -2766,23 +2749,16 @@ void tp_released(){
         // AUDIOPLAYER ******************************
         case 40:    changeBtn_released(0); break; //Mute
         case 41:    changeState(RADIO); webSrv.send("StateRadio");break;
-        case 42:    changeState(CLOCK); break;      //BTin
+        case 42:    changeState(CLOCK); break;
         case 43:    changeBtn_released(3); // first audiofile
-                    if(setAudioFolder("/audiofiles")) chptr = listAudioFile();
-                    if(chptr) strcpy(_afn, chptr);
-                    showFileName(_afn); break;
+                    next_track_needed(false);  //true=next; false=prev
+                    break;
         case 44:    changeBtn_released(4); // next audiofile
-                    chptr = listAudioFile();
-                    if(chptr) strcpy(_afn ,chptr);
-                    showFileName(_afn); break;
+                    next_track_needed(true); //1=next; 0=prev
+                    break;
         case 45:    if(!shuffle_play){shuffle_play=true;webSrv.send("shuffle_play=1\n");}else{shuffle_play=false;webSrv.send("shuffle_play=0\n");} changeBtn_released(5);break; 
-        case 46:    showVolumeBar(); // ready
-                    strcat(path, _afn);
-                    connecttoFS((const char*) path);
-                    if(_f_isFSConnected){
-                        free(_lastconnectedfile);
-                        _lastconnectedfile = strdup(path);
-                    } break;
+        case 46:    if(plays==SDcard){plays=DLNA;} else {plays=SDcard;}
+                    break;
 
         // AUDIOPLAYERico ******************************
         case 50:    changeBtn_released(0); break; // Mute
@@ -2872,7 +2848,7 @@ void WEBSRV_onCommand(const String cmd, const String param, const String arg){  
     if(cmd == "audiotracknew")      {webSrv.reply("generating new tracklist...\n"); nbroftracks=0;File root = SD_MMC.open("/audiofiles");tracklist(root, 0); return;}
     if(cmd == "shuffle_play")       {if(_state == PLAYER){_releaseNr=45; tp_released(); return;} else {if(shuffle_play) {shuffle_play=false; webSrv.reply("shuffle_play=0\n");}else{webSrv.reply("shuffle_play=1\n");} return;}}
     if(cmd == "getshuffle"){        webSrv.reply(String(int(shuffle_play)).c_str()); return;}
-    if(cmd == "changeplayer")       {nbroftracks=0;if(plays==Radio){plays=SDcard;} else if(plays==BTin){plays=Radio;}else if(plays==SDcard){plays=DLNA;} else if(plays=DLNA){ plays=BTin;}String msg="getplays=" + String(plays) ;webSrv.send(msg); Serial.println(msg); return;}
+    if(cmd == "changeplayer")       {nbroftracks=0;if(plays==Radio){plays=SDcard;} else if(plays==AUX){plays=Radio;}else if(plays==SDcard){plays=DLNA;} else if(plays=DLNA){ plays=AUX;}String msg="getplays=" + String(plays) ;webSrv.send(msg); Serial.println(msg); return;}
     if(cmd == "getplays")           {String msg="getplays=" + String(plays) ;webSrv.send(msg); return;}
     if(cmd == "uploadfile"){        _filename = param;  return;}
     if(cmd == "upvolume"){          str = "Volume is now " + (String)upvolume(); webSrv.reply(str.c_str()); SerialPrintfln("%s", str.c_str()); return;}
